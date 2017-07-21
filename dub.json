@@ -1,0 +1,28 @@
+{
+	"name": "d_db_vk",
+	"authors": [
+		"Nikita Savyolov"
+	],
+	"description": "VK plugin for deadbeef player",
+	"copyright": "Copyright © 2017, Nikita Savyolov",
+	"license": "MIT",
+	"dflags-linux-dmd": ["-fPIC"],
+	"dflags-linux-ldc2": ["-relocation-model=pic"],
+	"targetName": "d_db_vk",
+	"targetType": "dynamicLibrary",
+	"lflags": [
+		"-l:libssl.so.1.0.0",
+		"-l:libcrypto.so.1.0.0"	
+	],
+	"excludedSourceFiles": [
+		"source/headers_d/artwork.d"
+	],
+	"postBuildCommands": [
+		"mv libd_db_vk.so d_db_vk.so",
+		"mv d_db_vk.so ~/.local/lib/deadbeef",
+		"deadbeef"
+	],
+	"dependencies": {
+		"requests": "~>0.3.2",
+	}
+}
