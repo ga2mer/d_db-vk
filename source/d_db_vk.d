@@ -61,25 +61,11 @@ void add_to_list(void* data, AudioObject object) {
 
 static int on_search (GtkWidget *widget, void* data) {
     gtk_widget_set_sensitive (widget, false);
-    const(char)* query_text = gtk_entry_get_text (cast(GtkEntry*) widget);
+    string query_text = cast(string)gtk_entry_get_text (cast(GtkEntry*) widget).fromStringz;
+    gtk_list_store_clear(cast(GtkListStore*)data);
 
-    //writeln(fromStringz(query_text));
-
-    deadbeef_api.conf_lock();
-    string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
-    deadbeef_api.conf_unlock();
-    JSONValue rs = vk_api_request("", [
-        "access_hash": "", 
-        "act": "load_section",
-        "al": "1",
-        "claim": "0",
-        "is_loading_all": "1",
-        "owner_id": id,
-        "playlist_id": "-1",
-        "type": "playlist"
-    ]);
     try {
-        auto list = rs["list"].array;
+        auto list = vk_search_request(query_text).array;
         import std.xml : decode;
         foreach (e; list) {
             AudioObject aobject = {
@@ -108,6 +94,56 @@ static GtkCellRenderer* vk_gtk_cell_renderer_text_new_with_ellipsis() {
     GtkCellRenderer *renderer = gtk_cell_renderer_text_new ();
     g_object_set(renderer, toStringz("ellipsize"), PangoEllipsizeMode.END, null);
     return renderer;
+}
+
+static void on_my_music (GtkWidget *widget, void* data) {
+    gtk_widget_set_sensitive (widget, false);
+
+    gtk_list_store_clear(cast(GtkListStore*)data);
+
+    try {
+        auto list = vk_my_music_request().array;
+        import std.xml : decode;
+        foreach (e; list) {
+            AudioObject aobject = {
+                aid: cast(int)e[0].integer,
+                oid: cast(int)e[1].integer,
+                title: e[3].str.decode,
+                artist: e[4].str.decode,
+                formatted_duration: format("%d:%02d", e[5].integer / 60, e[5].integer % 60),
+                duration: cast(int)e[5].integer
+            };
+            add_to_list(data, aobject);
+        }
+    } catch(Throwable o) {
+        writeln(o);
+    }
+    gtk_widget_set_sensitive(widget, true);
+}
+
+static void on_suggested_music(GtkWidget* widget, void* data) {
+    gtk_widget_set_sensitive (widget, false);
+
+    gtk_list_store_clear(cast(GtkListStore*)data);
+
+    try {
+        auto list = vk_suggested_request().array;
+        import std.xml : decode;
+        foreach (e; list) {
+            AudioObject aobject = {
+                aid: cast(int)e[0].integer,
+                oid: cast(int)e[1].integer,
+                title: e[3].str.decode,
+                artist: e[4].str.decode,
+                formatted_duration: format("%d:%02d", e[5].integer / 60, e[5].integer % 60),
+                duration: cast(int)e[5].integer
+            };
+            add_to_list(data, aobject);
+        }
+    } catch(Throwable o) {
+        writeln(o);
+    }
+    gtk_widget_set_sensitive(widget, true);
 }
 
 void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *gtk_tree_path_list, const char *plt_name) {
@@ -151,62 +187,6 @@ void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *
     } catch(Throwable e) {
         writeln(e);
     }
-    /*ddb_playlist_t *plt;
-    plt = deadbeef.plt_get_curr();
-    if (!deadbeef.plt_add_files_begin (plt, 0)) {
-        DB_playItem_t *last = deadbeef.plt_get_last (plt, 0);
-
-        gtk_tree_path_list = g_list_last (gtk_tree_path_list);
-        //while (gtk_tree_path_list) {
-            GtkTreeIter iter;
-            gchar *artist;
-            gchar *title;
-            int duration;
-            int aid;
-            int owner_id;
-            //char url[VK_VFS_URL_LEN];
-
-            if (gtk_tree_model_get_iter(treemodel, &iter, (GtkTreePath *) gtk_tree_path_list.data)) {
-                DB_playItem_t *pt;
-                int pabort = 0;
-
-                gtk_tree_model_get (treemodel, &iter,
-                                    0, &artist,
-                                    1, &title,
-                                    2, &duration,
-                                    5, &aid,
-                                    6, &owner_id,
-                                    -1);
-                //vk_vfs_format_track_url (url, aid, owner_id);
-                pt = deadbeef.plt_insert_file2 (0, plt, last, toStringz("mdaheh"), &pabort, NULL, NULL);
-                deadbeef.pl_add_meta (pt, toStringz("artist"), artist);
-                deadbeef.pl_add_meta (pt, toStringz("title"), title);
-                deadbeef.plt_set_item_duration (plt, pt, duration);
-
-                g_free (artist);
-                g_free (title);
-            }
-
-            //gtk_tree_path_list = g_list_previous (gtk_tree_path_list);
-        //}
-
-        if (last) {
-            deadbeef->pl_item_unref (last);
-        }
-    }*/
-    /*if (plt_name) {
-        int idx = deadbeef->plt_add (deadbeef->plt_get_count (), plt_name);
-        deadbeef->plt_set_curr_idx (idx);
-        plt = deadbeef->plt_get_for_idx (idx);
-    } else {
-        plt = deadbeef->plt_get_curr ();
-    }
-
-    
-
-    deadbeef->plt_add_files_end (plt, 0);
-    deadbeef->plt_save_config (plt);
-    deadbeef->plt_unref (plt);*/
 }
 
 static void add_to_playlist (GtkTreeView *tree_view, const char *playlist) {
@@ -307,11 +287,17 @@ int vk_action_gtk(void *data) {
     gtk_container_add (cast(GtkContainer*)scroll_window, search_results);
     gtk_box_pack_start (cast(GtkBox*)dlg_vbox, scroll_window, true, true, 12);
     
+    GtkWidget* bottom_hbox = gtk_box_new(GtkOrientation.HORIZONTAL, 12);
+    gtk_box_pack_start(cast(GtkBox*)dlg_vbox, bottom_hbox, false, true, 0);
     
+    GtkWidget* my_music_button = gtk_button_new_with_label ("My music");
+    g_signal_connect_data(my_music_button, "clicked".toStringz, cast(GCallback)&on_my_music, list_store, null, GConnectFlags.AFTER);
+    gtk_box_pack_start (cast(GtkBox*)bottom_hbox, my_music_button, false, false, 0);
     
-    
-    
-    
+    GtkWidget* recommendations_button = gtk_button_new_with_label ("Recommended");
+    g_signal_connect_data(recommendations_button, "clicked".toStringz, cast(GCallback)&on_suggested_music, list_store, null, GConnectFlags.AFTER);
+    gtk_box_pack_start (cast(GtkBox*)bottom_hbox, recommendations_button, false, false, 0);
+
     
     gtk_widget_show_all (dlg_vbox);
 
@@ -414,8 +400,7 @@ static int vk_ddb_vfs_is_streaming() {
 DB_FILE* vk_ddb_vfs_open (const(char)*fname) {
     DB_FILE* f;
     string id = cast(string)(fname.fromStringz).replace("dvk://", "");
-    JSONValue rs = vk_api_request("", ["act": "reload_audio", "al": "1", "ids": id], true);
-    f = deadbeef.fopen(rs[0][2].str.toStringz);
+    f = deadbeef.fopen(vk_open_request(id).toStringz);
     return f;
 }
 
@@ -455,5 +440,6 @@ DB_plugin_t* d_db_vk_load(DB_functions_t* api){
     plugin.is_streaming = &vk_ddb_vfs_is_streaming;
     plugin.open = &vk_ddb_vfs_open;
     deadbeef = api;
+
     return DB_PLUGIN(&plugin);
 }

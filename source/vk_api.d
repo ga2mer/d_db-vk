@@ -1,35 +1,57 @@
 module vk_api;
+
 import deadbeefl;
 import requests;
-import std.regex, std.json, std.stdio, std.string;
+import std.conv, std.regex, std.json, std.stdio, std.string;
 import arsd.characterencodings;
 
 __gshared DB_functions_t* deadbeef_api;
 
-JSONValue vk_api_request(string method, string[string] args, bool isArray = false) {
+string UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36";
+
+JSONValue vk_api_request(string method, string[string] args, bool putOid = false) {
     deadbeef_api.conf_lock();
-    string session = cast(string)(deadbeef_api.conf_get_str_fast("dvk.session".toStringz, "noep".toStringz)).fromStringz;
+
+    string session = to!string(deadbeef_api.conf_get_str_fast("dvk.session".toStringz, "noep".toStringz).fromStringz);
+
     deadbeef_api.conf_unlock();
+
     auto rq = Request();
-    rq.addHeaders(["Cookie": "remixsid=%s;".format(session),
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36"
+
+    rq.addHeaders([
+        "Cookie": "remixsid=%s;".format(session),
+        "User-Agent": UA
     ]);
-    auto rs = rq.post("https://vk.com/al_audio.php", args);
+
+    auto rs = rq.post("https://vk.com/%s.php".format(method), args);
     try {
-        auto r = regex(`\{.*\}`);
-        if(isArray) {
-            r = regex(`\[.*\]`);
-        }
         string html = convertToUtf8(cast(immutable(ubyte)[])rs.responseBody.data, "windows1251");
-        import std.algorithm : find;
-        if(!html.find("<!json>").empty) {
-            auto m = html.matchAll(r);
-            JSONValue j = parseJSON(m.front[0]);
-            return j;
-        } else {
-            writeln("reauth");
-            vk_auth();
-            return vk_api_request(method, args);
+        auto r = regex(`\[.*\]`);
+        auto m = html.matchAll(r);
+        m.popFront();
+        JSONValue j = parseJSON(m.hit);
+        switch (j[1].type) {
+            case JSON_TYPE.FALSE:
+                return `{}`.parseJSON;
+            case JSON_TYPE.STRING:
+                if(j[1].str.startsWith("ERR_")) {
+                    return `{}`.parseJSON;
+                } else {
+                    writeln("no auth");
+                    vk_auth();
+                    if(putOid) {
+                        deadbeef_api.conf_lock();
+                        string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
+                        deadbeef_api.conf_unlock();
+                        args["owner_id"] = id;
+                    }
+                    return vk_api_request(method, args);
+                }
+            case JSON_TYPE.ARRAY:
+            case JSON_TYPE.OBJECT:
+                return j[1];
+            default:
+                break;
         }
     } catch(Throwable o) {
         writeln(o);
@@ -37,16 +59,72 @@ JSONValue vk_api_request(string method, string[string] args, bool isArray = fals
     return `{}`.parseJSON;
 }
 
+JSONValue vk_my_music_request() {
+    deadbeef_api.conf_lock();
+    string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
+    deadbeef_api.conf_unlock();
+
+    auto rs = vk_api_request("al_audio", [
+        "act": "load_section",
+        "al": "-1",
+        "claim": "0",
+        "is_loading_all": "1",
+        "owner_id": id,
+        "playlist_id": "-1",
+        "type": "playlist"
+    ], true);
+    return rs["list"];
+}
+
+JSONValue vk_search_request(string query) {
+    auto rs = vk_api_request("al_audio", [
+        "act": "load_section",
+        "al": "-1",
+        "is_loading_all": "1",
+        "playlist_id": "-1",
+        "type": "search",
+        "search_q": query
+    ]);
+
+    return rs["list"];
+}
+
+JSONValue vk_suggested_request() {
+    auto rs = vk_api_request("al_audio", [
+        "act": "load_section",
+        "al": "-1",
+        "claim": "0",
+        "is_loading_all": "1",
+        "playlist_id": "recoms1",
+        "type": "recoms"
+    ]);
+
+    return rs["list"];
+}
+
+string vk_open_request(string id) {
+    auto rs = vk_api_request("al_audio", [
+        "act": "reload_audio",
+        "al": "-1",
+        "ids": id
+    ]);
+    return rs[0][2].str;
+}
+
 void vk_auth() {
     auto rq = Request();
-    //rq.cookie;
+
     rq.addHeaders([
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36"
+        "User-Agent": UA
     ]);
+
     deadbeef_api.conf_lock();
-    string login = cast(string)(deadbeef_api.conf_get_str_fast("dvk.login".toStringz, "noep".toStringz)).fromStringz;
-    string password = cast(string)(deadbeef_api.conf_get_str_fast("dvk.password".toStringz, "noep".toStringz)).fromStringz;
+
+    string login = to!string(deadbeef_api.conf_get_str_fast("dvk.login".toStringz, "noep".toStringz));
+    string password = to!string(deadbeef_api.conf_get_str_fast("dvk.password".toStringz, "noep".toStringz));
+
     deadbeef_api.conf_unlock();
+
     MultipartForm form;
     form.add(formData("act", "login"));
     form.add(formData("role", "al_frame"));
@@ -59,7 +137,7 @@ void vk_auth() {
 
     try {
         auto rs = rq.exec!"GET"("https://vk.com/login?m=1&email=login");
-        string html = cast(string)rs.responseBody.data;
+        string html = to!string(rs.responseBody);
         auto ip_h_rx = regex(`<input type="hidden" name="ip_h" value="(.*)"`);
         auto lg_h_rx = regex(`<input type="hidden" name="lg_h" value="(.*)"`);
         auto ip_h = html.matchAll(ip_h_rx).front[1];
@@ -68,7 +146,7 @@ void vk_auth() {
         form.add(formData("lg_h", lg_h));
         auto rsLogin = rq.exec!"POST"("https://login.vk.com/?act=login", form);
         auto id_rx = `"uid":"(\d*)"`.regex;
-        string login_html = cast(string)rsLogin.responseBody.data;
+        string login_html = to!string(rsLogin.responseBody);
         string id = login_html.matchAll(id_rx).front[1];
         string cookie = "";
         foreach(e; rq.cookie) {
