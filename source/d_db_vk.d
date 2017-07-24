@@ -8,6 +8,7 @@ import deadbeefl;
 import gtk.c.functions;
 import gtk.c.types;
 import glib.c.functions;
+import gdk.c.functions;
 import gobject.c.functions;
 import requests;
 import gtkui_api;
@@ -284,6 +285,9 @@ int vk_action_gtk(void *data) {
     gtk_tree_selection_set_mode (gtk_tree_view_get_selection (cast(GtkTreeView*)search_results), GtkSelectionMode.MULTIPLE);
 
     g_signal_connect_data(search_results, toStringz("row-activated"), cast(GCallback)&on_search_results_row_activate, null, null, GConnectFlags.AFTER);
+    g_signal_connect_data(search_results, toStringz("popup-menu"), cast(GCallback)&on_search_results_popup_menu, null, null, GConnectFlags.AFTER);
+    //dirty hack
+    g_signal_connect_data(search_results, toStringz("button-press-event"), cast(GCallback)&on_search_results_button_press, search_results, null, GConnectFlags.SWAPPED);
 
     GtkWidget* scroll_window = gtk_scrolled_window_new (null, null);
     gtk_scrolled_window_set_policy (cast(GtkScrolledWindow*)scroll_window, GtkPolicyType.AUTOMATIC, GtkPolicyType.AUTOMATIC);
@@ -325,6 +329,60 @@ int vk_action_gtk(void *data) {
     gtk_widget_show (add_tracks_dlg);
 
     return 0;
+}
+
+static void on_menu_item_add_to_playlist(GtkWidget *menu_item, GtkTreeView *tree_view) {
+    add_to_playlist(tree_view, null);
+}
+
+static void show_popup_menu (GtkTreeView *treeview, GdkEventButton *event) {
+    GtkTreeSelection *selection;
+    GtkWidget* menu, item;
+
+    selection = gtk_tree_view_get_selection(treeview);
+    if (!gtk_tree_selection_count_selected_rows(selection)) {
+        // don't show menu on empty tree view
+        return;
+    }
+
+    menu = gtk_menu_new ();
+
+    item = gtk_menu_item_new_with_label ("Add to current playlist");
+    g_signal_connect_data(item, "activate".toStringz, cast(GCallback)&on_menu_item_add_to_playlist, treeview, null, GConnectFlags.AFTER);
+    gtk_menu_shell_append (cast(GtkMenuShell*)menu, item);
+
+    //item = gtk_menu_item_new_with_label ("Copy URL(s)");
+    //g_signal_connect (item, "activate", G_CALLBACK (on_menu_item_copy_url), treeview);
+    //gtk_menu_shell_append(cast(GtkMenuShell*)menu, item);
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup(cast(GtkMenu*)menu, null, null, null, null, 0, gdk_event_get_time(cast(GdkEvent*) event));
+}
+
+static int on_search_results_button_press(GtkTreeView *treeview, GdkEventButton *event, void* userdata) {
+    if (!gtkui_plugin.w_get_design_mode() && event.type == GdkEventType.BUTTON_PRESS && event.button == 3) {
+        GtkTreeView* tv = cast(GtkTreeView*)userdata;
+        GtkTreeSelection *selection;
+
+        selection = gtk_tree_view_get_selection (tv);
+        if (gtk_tree_selection_count_selected_rows(selection) <= 1) {
+            GtkTreePath *path;
+            if (gtk_tree_view_get_path_at_pos(tv, cast(int)event.x, cast(int)event.y, &path, null, null, null )) {
+                gtk_tree_selection_unselect_all(selection);
+                gtk_tree_selection_select_path (selection, path);
+                gtk_tree_path_free (path);
+            }
+        }
+
+        show_popup_menu(treeview, event);
+        return 1;
+    }
+    return 0;
+}
+
+static int on_search_results_popup_menu(GtkTreeView *treeview, void* userdata) {
+    show_popup_menu(treeview, null);
+    return 1;
 }
 
 static int vk_ddb_action_callback(DB_plugin_action_t *action, int ctx) {
