@@ -59,6 +59,7 @@ void add_to_list(void* data, JSONValue object) {
                             5, to!int(object[0].integer),
                             6, to!int(object[1].integer),
                             7, object[14].str.toStringz,
+                            8, HQ_formatted(object[10].integer).toStringz,
                             -1);
 }
 
@@ -68,7 +69,12 @@ static int on_search (GtkWidget *widget, void* data) {
     gtk_list_store_clear(cast(GtkListStore*)data);
 
     try {
-        auto list = vk_search_request(query_text);
+        JSONValue[] list;
+        if (query_text.startsWith("https://vk.com")) {
+            list = vk_get_by_id(query_text);
+        } else {
+            list = vk_search_request(query_text);
+        }
         foreach (e; list) {
             add_to_list(data, e);
         }
@@ -81,7 +87,7 @@ static int on_search (GtkWidget *widget, void* data) {
 }
 
 static void on_search_target_changed (GtkWidget *widget, void* data) {
-    //vk_search_opts.search_target = (VkSearchTarget) gtk_combo_box_get_active(GTK_COMBO_BOX (widget));
+    search_target_id = gtk_combo_box_get_active(cast(GtkComboBox*)widget);
 }
 
 static GtkCellRenderer* vk_gtk_cell_renderer_text_new_with_ellipsis() {
@@ -139,12 +145,8 @@ void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *
             gtk_tree_path_list = g_list_last(gtk_tree_path_list);
             while (gtk_tree_path_list) {
                 GtkTreeIter iter;
-                char* artist;
-                char* title;
-                int duration;
-                int aid;
-                int owner_id;
-                char* covers;
+                char* artist, title, covers;
+                int duration, aid, owner_id;
                 if (gtk_tree_model_get_iter(treemodel, &iter, cast(GtkTreePath*)gtk_tree_path_list.data)) {
                     gtk_tree_model_get (treemodel, &iter,
                                     0, &artist,
@@ -209,7 +211,7 @@ static void on_search_results_row_activate (GtkTreeView *tree_view, GtkTreePath 
 int vk_action_gtk(void *data) {
     GtkWidget *dlg_vbox = gtk_box_new (GtkOrientation.VERTICAL, 0);
 
-    GtkListStore *list_store = gtk_list_store_new (cast(int)8,
+    GtkListStore *list_store = gtk_list_store_new (cast(int)9,
                                      GType.STRING,     // ARTIST
                                      GType.STRING,     // TITLE
                                      GType.INT,        // DURATION seconds, not rendered
@@ -217,7 +219,8 @@ int vk_action_gtk(void *data) {
                                      GType.STRING,     // URL, not rendered
                                      GType.INT,        // AID, not rendered
                                      GType.INT,        // OWNER_ID, not rendered
-                                     GType.STRING      // COVERS, not rendered
+                                     GType.STRING,     // COVERS, not rendered
+                                     GType.STRING      // QUALITY
                                      );
 
     GtkWidget *search_hbox = gtk_box_new(GtkOrientation.HORIZONTAL, 12);
@@ -231,11 +234,10 @@ int vk_action_gtk(void *data) {
 
     GtkWidget* search_target = gtk_combo_box_text_new();
     // must to order of VkSearchTarget entries
-    gtk_combo_box_text_append_text(cast(GtkComboBoxText*)search_target, toStringz("Anywhere"));
-    gtk_combo_box_text_append_text(cast(GtkComboBoxText*)search_target, toStringz("Artist"));
     gtk_combo_box_text_append_text(cast(GtkComboBoxText*)search_target, toStringz("Title"));
+    gtk_combo_box_text_append_text(cast(GtkComboBoxText*)search_target, toStringz("Artist"));
     gtk_combo_box_set_active(cast(GtkComboBox*)search_target, 0);
-    g_signal_connect_data(search_text, toStringz("changed"), cast(GCallback)&on_search_target_changed, list_store, null, GConnectFlags.AFTER);
+    g_signal_connect_data(search_target, toStringz("changed"), cast(GCallback)&on_search_target_changed, list_store, null, GConnectFlags.AFTER);
     gtk_box_pack_start(cast(GtkBox*)search_hbox, search_target, false, false, 0);
 
     GtkWidget* search_results = gtk_tree_view_new_with_model (cast(GtkTreeModel*)list_store);
@@ -248,7 +250,9 @@ int vk_action_gtk(void *data) {
     gtk_tree_view_insert_column_with_attributes(cast(GtkTreeView*)search_results, -1, toStringz("Duration"),
                                                  gtk_cell_renderer_text_new (),
                                                  toStringz("text"), 3, null);
-
+    gtk_tree_view_insert_column_with_attributes(cast(GtkTreeView*)search_results, -1, toStringz("Quality"),
+                                                 gtk_cell_renderer_text_new (),
+                                                 toStringz("text"), 8, null);
     GtkTreeViewColumn *col;
     // artist col is resizeable and sortable
     col = gtk_tree_view_get_column (cast(GtkTreeView*)search_results, 0);

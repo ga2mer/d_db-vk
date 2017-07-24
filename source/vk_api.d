@@ -9,6 +9,8 @@ __gshared DB_functions_t* deadbeef_api;
 
 string UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36";
 
+int search_target_id = 0;
+
 JSONValue vk_api_request(string method, string[string] args, bool putOid = false) {
     deadbeef_api.conf_lock();
 
@@ -83,8 +85,38 @@ JSONValue[] vk_search_request(string query) {
         "is_loading_all": "1",
         "playlist_id": "-1",
         "type": "search",
-        "search_q": query
+        "search_q": query,
+        "search_performer": to!string(search_target_id)
     ]);
+
+    return rs["list"].array;
+}
+
+JSONValue[] vk_get_by_id(string link) {
+
+    auto rx = `https:\/\/vk\.com\/(.*)\/?$`.regex;
+
+    auto m = link.matchAll(rx);
+
+    auto content = getContent("https://api.vk.com/method/utils.resolveScreenName?screen_name=%s".format(m.front[1]));
+
+    auto s = to!string(content).parseJSON;
+
+    long owner_id = s["response"]["object_id"].integer;
+
+    if(s["response"]["type"].str == "group") {
+        owner_id = -owner_id;
+    }
+
+    auto rs = vk_api_request("al_audio", [
+        "act": "load_section",
+        "al": "-1",
+        "claim": "0",
+        "is_loading_all": "1",
+        "owner_id": to!string(owner_id),
+        "playlist_id": "-1",
+        "type": "playlist"
+    ], true);
 
     return rs["list"].array;
 }
@@ -168,4 +200,17 @@ void vk_auth() {
 
 void initAPI(DB_functions_t* deadbeef) {
     deadbeef_api = deadbeef;
+}
+
+bool hasHQ(long flags) {
+    return (flags & 16) == 16;
+}
+
+string HQ_formatted(long flags) {
+    bool has_hq = hasHQ(flags);
+    if(has_hq) {
+        return "HQ";
+    } else {
+        return "";
+    }
 }

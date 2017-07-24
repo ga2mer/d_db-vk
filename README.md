@@ -9,6 +9,7 @@ Features
 --------
 * Retrieve 'My Music' contents
 * Retrieve 'Suggested' contents
+* Retrieve contents from other users or groups
 * Retrieve contents from search
 * Play
 * Album artwork
@@ -38,6 +39,7 @@ Issues
 * Треки со своей страницы
 * Рекомендуемые треки
 * Поиск по трекам
+* Треки с других страниц
 * Проигрывание
 * Обложки из сервиса
 
