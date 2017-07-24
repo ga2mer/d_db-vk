@@ -8,7 +8,10 @@ Created without knowledge dlang for learning dlang
 Features
 --------
 * Retrieve 'My Music' contents
+* Retrieve 'Suggested' contents
+* Retrieve contents from search
 * Play
+* Album artwork
 
 To-Do
 -----
@@ -16,7 +19,6 @@ To-Do
 * Other VK features
 * captcha and 2fa
 * Support YouTube, SoundCloud and more..
-* Album artwork
 * etc..
 
 Issues
@@ -34,7 +36,10 @@ Issues
 Возможности
 ----------
 * Треки со своей страницы
+* Рекомендуемые треки
+* Поиск по трекам
 * Проигрывание
+* Обложки из сервиса
 
 To-Do
 -----
@@ -42,7 +47,6 @@ To-Do
 * Поддержка остальных фич контакта и db-vk
 * Капча и 2fa
 * Поддержка ютуба, soundcloud и других..
-* Обложки из сервиса
 * остальное..
 
 Проблемы
