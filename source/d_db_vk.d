@@ -3,7 +3,7 @@ module d_db_vk;
 import std.uni;
 import core.runtime;
 import core.thread;
-import std.regex, std.json, std.stdio, std.string;
+import std.path, std.conv, std.regex, std.json, std.stdio, std.string;
 import deadbeefl;
 import gtk.c.functions;
 import gtk.c.types;
@@ -34,6 +34,7 @@ static int vk_stop() {
 const(char)* s = `
 property "Username" entry dvk.login "";
 property "Password" password dvk.password "";
+property "Download cover" checkbox dvk.download_cover 1;
 `;
 
 struct AudioObject { 
@@ -45,17 +46,19 @@ struct AudioObject {
     int duration;
 }
 
-void add_to_list(void* data, AudioObject object) {
+void add_to_list(void* data, JSONValue object) {
     GtkTreeIter iter;
     gtk_list_store_append(cast(GtkListStore*)data, &iter);
+    import std.xml : decode;
     gtk_list_store_set (cast(GtkListStore*)data, &iter,
-                            0, toStringz(object.artist),
-                            1, toStringz(object.title),
-                            2, object.duration,
-                            3, toStringz(object.formatted_duration),
-                            4, toStringz("url"),
-                            5, object.aid,
-                            6, object.oid,
+                            0, object[4].str.decode.toStringz,
+                            1, object[3].str.decode.toStringz,
+                            2, to!int(object[5].integer),
+                            3, "%d:%02d".format(object[5].integer / 60, object[5].integer % 60).toStringz,
+                            4, "url".toStringz,
+                            5, to!int(object[0].integer),
+                            6, to!int(object[1].integer),
+                            7, object[14].str.toStringz,
                             -1);
 }
 
@@ -65,18 +68,9 @@ static int on_search (GtkWidget *widget, void* data) {
     gtk_list_store_clear(cast(GtkListStore*)data);
 
     try {
-        auto list = vk_search_request(query_text).array;
-        import std.xml : decode;
+        auto list = vk_search_request(query_text);
         foreach (e; list) {
-            AudioObject aobject = {
-                aid: cast(int)e[0].integer,
-                oid: cast(int)e[1].integer,
-                title: e[3].str.decode,
-                artist: e[4].str.decode,
-                formatted_duration: format("%d:%02d", e[5].integer / 60, e[5].integer % 60),
-                duration: cast(int)e[5].integer
-            };
-            add_to_list(data, aobject);
+            add_to_list(data, e);
         }
     } catch(Throwable o) {
         writeln(o);
@@ -96,24 +90,17 @@ static GtkCellRenderer* vk_gtk_cell_renderer_text_new_with_ellipsis() {
     return renderer;
 }
 
+
+
 static void on_my_music (GtkWidget *widget, void* data) {
     gtk_widget_set_sensitive (widget, false);
 
     gtk_list_store_clear(cast(GtkListStore*)data);
 
     try {
-        auto list = vk_my_music_request().array;
-        import std.xml : decode;
+        auto list = vk_my_music_request();
         foreach (e; list) {
-            AudioObject aobject = {
-                aid: cast(int)e[0].integer,
-                oid: cast(int)e[1].integer,
-                title: e[3].str.decode,
-                artist: e[4].str.decode,
-                formatted_duration: format("%d:%02d", e[5].integer / 60, e[5].integer % 60),
-                duration: cast(int)e[5].integer
-            };
-            add_to_list(data, aobject);
+            add_to_list(data, e);
         }
     } catch(Throwable o) {
         writeln(o);
@@ -127,18 +114,9 @@ static void on_suggested_music(GtkWidget* widget, void* data) {
     gtk_list_store_clear(cast(GtkListStore*)data);
 
     try {
-        auto list = vk_suggested_request().array;
-        import std.xml : decode;
+        auto list = vk_suggested_request();
         foreach (e; list) {
-            AudioObject aobject = {
-                aid: cast(int)e[0].integer,
-                oid: cast(int)e[1].integer,
-                title: e[3].str.decode,
-                artist: e[4].str.decode,
-                formatted_duration: format("%d:%02d", e[5].integer / 60, e[5].integer % 60),
-                duration: cast(int)e[5].integer
-            };
-            add_to_list(data, aobject);
+            add_to_list(data, e);
         }
     } catch(Throwable o) {
         writeln(o);
@@ -148,6 +126,12 @@ static void on_suggested_music(GtkWidget* widget, void* data) {
 
 void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *gtk_tree_path_list, const char *plt_name) {
     try {
+        deadbeef_api.conf_lock();
+
+        bool download_cover = to!bool(deadbeef_api.conf_get_int("dvk.download_cover".toStringz, 1));
+
+        deadbeef_api.conf_unlock();
+
         ddb_playlist_t* plt = deadbeef.plt_get_curr();
         if (!deadbeef.plt_add_files_begin(plt, 0)) {
             DB_playItem_t* last = deadbeef.plt_get_last(plt, 0);
@@ -160,6 +144,7 @@ void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *
                 int duration;
                 int aid;
                 int owner_id;
+                char* covers;
                 if (gtk_tree_model_get_iter(treemodel, &iter, cast(GtkTreePath*)gtk_tree_path_list.data)) {
                     gtk_tree_model_get (treemodel, &iter,
                                     0, &artist,
@@ -167,13 +152,26 @@ void vk_add_tracks_from_tree_model_to_playlist (GtkTreeModel *treemodel, GList *
                                     2, &duration,
                                     5, &aid,
                                     6, &owner_id,
+                                    7, &covers,
                                     -1);
                     int pabort = 0;
                     DB_playItem_t *pt = deadbeef.plt_insert_file2(0, plt, last, "dvk://%s_%s".format(owner_id, aid).toStringz, &pabort, null, null);
-                    //writeln("%s - %s -- %s %s_%s".format(artist.fromStringz, title.fromStringz, duration, owner_id, aid));
                     deadbeef.pl_add_meta(pt, "artist".toStringz, artist);
                     deadbeef.pl_add_meta(pt, "title".toStringz, title);
                     deadbeef.plt_set_item_duration(plt, pt, duration);
+                    if(download_cover) {
+                        string sdir = to!string(deadbeef.get_system_dir(ddb_sys_directory_t.DDB_SYS_DIR_CACHE));
+                        string dir = buildPath(sdir, "covers", to!string(artist));
+                        string full_path = buildPath(dir, "%s.jpg".format(to!string(title)));
+                        string cover = to!string(covers);
+                        if(cover) {
+                            import std.file : mkdirRecurse, write;
+                            mkdirRecurse(dir);
+                            string max_cover = cover.split(",")[1].strip();
+                            auto content = getContent(max_cover);
+                            write(full_path, content.data);
+                        }
+                    }
                     gtk_tree_path_list = gtk_tree_path_list.prev;
                 }
             }
@@ -211,14 +209,15 @@ static void on_search_results_row_activate (GtkTreeView *tree_view, GtkTreePath 
 int vk_action_gtk(void *data) {
     GtkWidget *dlg_vbox = gtk_box_new (GtkOrientation.VERTICAL, 0);
 
-    GtkListStore *list_store = gtk_list_store_new (cast(int)7,
+    GtkListStore *list_store = gtk_list_store_new (cast(int)8,
                                      GType.STRING,     // ARTIST
                                      GType.STRING,     // TITLE
                                      GType.INT,        // DURATION seconds, not rendered
                                      GType.STRING,     // DURATION_FORMATTED
                                      GType.STRING,     // URL, not rendered
                                      GType.INT,        // AID, not rendered
-                                     GType.INT         // OWNER_ID, not rendered
+                                     GType.INT,        // OWNER_ID, not rendered
+                                     GType.STRING      // COVERS, not rendered
                                      );
 
     GtkWidget *search_hbox = gtk_box_new(GtkOrientation.HORIZONTAL, 12);
@@ -341,31 +340,19 @@ static DB_plugin_action_t* vk_ddb_get_actions(DB_playItem_t *it) {
 }
 
 static int vk_ddb_connect () {
-    /*vfs_curl_plugin = (DB_vfs_t *) deadbeef->plug_get_for_id ("vfs_curl");
-    if (!vfs_curl_plugin) {
-        trace ("cURL VFS plugin required\n");
-        return -1;
-    }
-
-    gtkui_plugin = (ddb_gtkui_t *) deadbeef->plug_get_for_id (DDB_GTKUI_PLUGIN_ID);
-
-    if (gtkui_plugin && gtkui_plugin->gui.plugin.version_major == 2) {  // gtkui version 2
-        vk_initialise (deadbeef, gtkui_plugin);
-        gtkui_plugin->w_reg_widget ("VK Browser", DDB_WF_SINGLE_INSTANCE, w_vkbrowser_create, "vkbrowser", NULL);
-        vk_config_changed ();   // refresh config at start
-        return 0;
-    }*/
-
     vfs_curl_plugin = cast(DB_vfs_t*) deadbeef.plug_get_for_id ("vfs_curl");
     if (!vfs_curl_plugin) {
         writeln("cURL VFS plugin required\n");
         return -1;
     }
 
-    gtkui_plugin = cast(ddb_gtkui_t *) deadbeef.plug_get_for_id (DDB_GTKUI_PLUGIN_ID);
-    initAPI(deadbeef);
-    writeln("connect");
-    return 0;
+    gtkui_plugin = cast(ddb_gtkui_t*)deadbeef.plug_get_for_id (DDB_GTKUI_PLUGIN_ID);
+    if (gtkui_plugin && gtkui_plugin.gui.plugin.version_major == 2) {  // gtkui version 2
+        initAPI(deadbeef);
+        writeln("connect");
+        return 0;
+    }
+    return -1;
 }
 
 static vk_ddb_disconnect() {
@@ -404,18 +391,6 @@ DB_FILE* vk_ddb_vfs_open (const(char)*fname) {
     return f;
 }
 
-/*static int vk_ddb_message (uint id, ulong ctx, uint p1, uint p2) {
-    switch (id) {
-        case DB_EV_CONFIGCHANGED:
-            //vk_config_changed();
-            writeln("config changed");
-            break;
-        default:
-            break;
-    }
-    return 0;
-}*/
-
 DB_plugin_t* d_db_vk_load(DB_functions_t* api){
     import core.exception;
 
@@ -432,7 +407,6 @@ DB_plugin_t* d_db_vk_load(DB_functions_t* api){
     plugin.plugin.configdialog = s;
     plugin.plugin.connect = &vk_ddb_connect,
     plugin.plugin.disconnect = &vk_ddb_disconnect,
-    //plugin.plugin.message = &vk_ddb_message,
     plugin.plugin.start = &vk_start;
     plugin.plugin.stop = &vk_stop;
     plugin.plugin.get_actions = &vk_ddb_get_actions;
@@ -440,6 +414,5 @@ DB_plugin_t* d_db_vk_load(DB_functions_t* api){
     plugin.is_streaming = &vk_ddb_vfs_is_streaming;
     plugin.open = &vk_ddb_vfs_open;
     deadbeef = api;
-
     return DB_PLUGIN(&plugin);
 }

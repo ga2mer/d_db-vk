@@ -59,7 +59,7 @@ JSONValue vk_api_request(string method, string[string] args, bool putOid = false
     return `{}`.parseJSON;
 }
 
-JSONValue vk_my_music_request() {
+JSONValue[] vk_my_music_request() {
     deadbeef_api.conf_lock();
     string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
     deadbeef_api.conf_unlock();
@@ -73,10 +73,10 @@ JSONValue vk_my_music_request() {
         "playlist_id": "-1",
         "type": "playlist"
     ], true);
-    return rs["list"];
+    return rs["list"].array;
 }
 
-JSONValue vk_search_request(string query) {
+JSONValue[] vk_search_request(string query) {
     auto rs = vk_api_request("al_audio", [
         "act": "load_section",
         "al": "-1",
@@ -86,10 +86,10 @@ JSONValue vk_search_request(string query) {
         "search_q": query
     ]);
 
-    return rs["list"];
+    return rs["list"].array;
 }
 
-JSONValue vk_suggested_request() {
+JSONValue[] vk_suggested_request() {
     auto rs = vk_api_request("al_audio", [
         "act": "load_section",
         "al": "-1",
@@ -99,7 +99,7 @@ JSONValue vk_suggested_request() {
         "type": "recoms"
     ]);
 
-    return rs["list"];
+    return rs["list"].array;
 }
 
 string vk_open_request(string id) {
