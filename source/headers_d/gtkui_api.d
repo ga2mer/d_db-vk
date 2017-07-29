@@ -25,7 +25,7 @@
 module gtkui_api;
 import core.stdc.stdint;
 import gtk.c.types;
-import deadbeefl;
+import db;
 
 extern (C):
 

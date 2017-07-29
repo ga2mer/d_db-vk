@@ -1,22 +1,21 @@
-module vk_api;
+module vkapi;
 
-import deadbeefl;
+import db;
+import vkdecode;
 import requests;
-import std.conv, std.regex, std.json, std.stdio, std.string;
+import std.conv, std.regex, std.json, std.stdio, std.string, std.algorithm.searching;
 import arsd.characterencodings;
-
-__gshared DB_functions_t* deadbeef_api;
-
+import plugin;
 string UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36";
 
-int search_target_id = 0;
+int searchTargetId = 0;
 
-JSONValue vk_api_request(string method, string[string] args, bool putOid = false) {
-    deadbeef_api.conf_lock();
+JSONValue vkAPIRequest(string method, string[string] args, bool putOid = false) {
+    deadbeef.conf_lock();
 
-    string session = to!string(deadbeef_api.conf_get_str_fast("dvk.session".toStringz, "noep".toStringz).fromStringz);
+    string session = to!string(deadbeef.conf_get_str_fast("dvk.session".toStringz, "noep".toStringz).fromStringz);
 
-    deadbeef_api.conf_unlock();
+    deadbeef.conf_unlock();
 
     auto rq = Request();
 
@@ -40,14 +39,14 @@ JSONValue vk_api_request(string method, string[string] args, bool putOid = false
                     return `{}`.parseJSON;
                 } else {
                     writeln("no auth");
-                    vk_auth();
+                    vkAuth();
                     if(putOid) {
-                        deadbeef_api.conf_lock();
-                        string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
-                        deadbeef_api.conf_unlock();
+                        deadbeef.conf_lock();
+                        string id = cast(string)(deadbeef.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
+                        deadbeef.conf_unlock();
                         args["owner_id"] = id;
                     }
-                    return vk_api_request(method, args);
+                    return vkAPIRequest(method, args);
                 }
             case JSON_TYPE.ARRAY:
             case JSON_TYPE.OBJECT:
@@ -61,12 +60,12 @@ JSONValue vk_api_request(string method, string[string] args, bool putOid = false
     return `{}`.parseJSON;
 }
 
-JSONValue[] vk_my_music_request() {
-    deadbeef_api.conf_lock();
-    string id = cast(string)(deadbeef_api.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
-    deadbeef_api.conf_unlock();
+JSONValue[] vkMyMusicRequest() {
+    deadbeef.conf_lock();
+    string id = cast(string)(deadbeef.conf_get_str_fast("dvk.id".toStringz, "0".toStringz)).fromStringz;
+    deadbeef.conf_unlock();
 
-    auto rs = vk_api_request("al_audio", [
+    auto rs = vkAPIRequest("al_audio", [
         "act": "load_section",
         "al": "-1",
         "claim": "0",
@@ -78,21 +77,21 @@ JSONValue[] vk_my_music_request() {
     return rs["list"].array;
 }
 
-JSONValue[] vk_search_request(string query) {
-    auto rs = vk_api_request("al_audio", [
+JSONValue[] vkSearchRequest(string query) {
+    auto rs = vkAPIRequest("al_audio", [
         "act": "load_section",
         "al": "-1",
         "is_loading_all": "1",
         "playlist_id": "-1",
         "type": "search",
         "search_q": query,
-        "search_performer": to!string(search_target_id)
+        "search_performer": to!string(searchTargetId)
     ]);
 
     return rs["list"].array;
 }
 
-JSONValue[] vk_get_by_id(string link) {
+JSONValue[] vkGetById(string link) {
 
     auto rx = `https:\/\/vk\.com\/(.*)\/?$`.regex;
 
@@ -102,18 +101,18 @@ JSONValue[] vk_get_by_id(string link) {
 
     auto s = to!string(content).parseJSON;
 
-    long owner_id = s["response"]["object_id"].integer;
+    long ownerid = s["response"]["object_id"].integer;
 
     if(s["response"]["type"].str == "group") {
-        owner_id = -owner_id;
+        ownerid = -ownerid;
     }
 
-    auto rs = vk_api_request("al_audio", [
+    auto rs = vkAPIRequest("al_audio", [
         "act": "load_section",
         "al": "-1",
         "claim": "0",
         "is_loading_all": "1",
-        "owner_id": to!string(owner_id),
+        "owner_id": to!string(ownerid),
         "playlist_id": "-1",
         "type": "playlist"
     ], true);
@@ -121,8 +120,8 @@ JSONValue[] vk_get_by_id(string link) {
     return rs["list"].array;
 }
 
-JSONValue[] vk_suggested_request() {
-    auto rs = vk_api_request("al_audio", [
+JSONValue[] vkSuggestedRequest() {
+    auto rs = vkAPIRequest("al_audio", [
         "act": "load_section",
         "al": "-1",
         "claim": "0",
@@ -134,28 +133,31 @@ JSONValue[] vk_suggested_request() {
     return rs["list"].array;
 }
 
-string vk_open_request(string id) {
-    auto rs = vk_api_request("al_audio", [
+string vkOpenRequest(string id) {
+    auto rs = vkAPIRequest("al_audio", [
         "act": "reload_audio",
         "al": "-1",
         "ids": id
     ]);
+    if(rs[0][2].str.find("audio_api_unavailable")) {
+        return decode(rs[0][2].str);
+    }
     return rs[0][2].str;
 }
 
-void vk_auth() {
+void vkAuth() {
     auto rq = Request();
 
     rq.addHeaders([
         "User-Agent": UA
     ]);
 
-    deadbeef_api.conf_lock();
+    deadbeef.conf_lock();
 
-    string login = to!string(deadbeef_api.conf_get_str_fast("dvk.login".toStringz, "noep".toStringz));
-    string password = to!string(deadbeef_api.conf_get_str_fast("dvk.password".toStringz, "noep".toStringz));
+    string login = to!string(deadbeef.conf_get_str_fast("dvk.login".toStringz, "noep".toStringz));
+    string password = to!string(deadbeef.conf_get_str_fast("dvk.password".toStringz, "noep".toStringz));
 
-    deadbeef_api.conf_unlock();
+    deadbeef.conf_unlock();
 
     MultipartForm form;
     form.add(formData("act", "login"));
@@ -188,9 +190,9 @@ void vk_auth() {
         }
         if(!cookie.empty) {
             writeln(cookie);
-            deadbeef_api.conf_set_str("dvk.session".toStringz, cookie.toStringz);
-            deadbeef_api.conf_set_str("dvk.id".toStringz, id.toStringz);
-            deadbeef_api.conf_save();
+            deadbeef.conf_set_str("dvk.session".toStringz, cookie.toStringz);
+            deadbeef.conf_set_str("dvk.id".toStringz, id.toStringz);
+            deadbeef.conf_save();
             writeln("writed");
         }
     } catch(Throwable e) {
@@ -198,15 +200,11 @@ void vk_auth() {
     }
 }
 
-void initAPI(DB_functions_t* deadbeef) {
-    deadbeef_api = deadbeef;
-}
-
 bool hasHQ(long flags) {
     return (flags & 16) == 16;
 }
 
-string HQ_formatted(long flags) {
+string formattedHQ(long flags) {
     bool has_hq = hasHQ(flags);
     if(has_hq) {
         return "HQ";

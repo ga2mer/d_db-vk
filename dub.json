@@ -18,8 +18,7 @@
 		"source/headers_d/artwork.d"
 	],
 	"postBuildCommands": [
-		"mv libd_db_vk.so d_db_vk.so",
-		"mv d_db_vk.so ~/.local/lib/deadbeef",
+		"mv libd_db_vk.so ~/.local/lib/deadbeef/d_db_vk_gtk3.so",
 		"deadbeef"
 	],
 	"dependencies": {

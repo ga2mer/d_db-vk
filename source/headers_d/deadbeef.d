@@ -1,4 +1,4 @@
-module deadbeefl;
+module db;
 /*
   deadbeef.h -- plugin API of the DeaDBeeF audio player
   http://deadbeef.sourceforge.net
