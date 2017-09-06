@@ -200,15 +200,6 @@ void vkAuth() {
     }
 }
 
-bool hasHQ(long flags) {
-    return (flags & 16) == 16;
-}
+bool hasHQ(long flags) { return (flags & 16) == 16; }
 
-string formattedHQ(long flags) {
-    bool has_hq = hasHQ(flags);
-    if(has_hq) {
-        return "HQ";
-    } else {
-        return "";
-    }
-}
+string formattedHQ(long flags) { return hasHQ(flags) ? "HQ" : ""; }
